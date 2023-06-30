@@ -25,7 +25,7 @@ struct Data {
 }
 
 const MAX_WORKERS: usize = 4; // maximum number of worker processes???
-const TASK_SIZE: usize = 2; // max number of rows or columns
+const TASK_SIZE: usize = 2; // maximum number of rows or columns???
 
 #[post("/", format = "json", data = "<data>")]
 fn matrix_handler(data: Json<Data>) -> String {
@@ -38,17 +38,17 @@ fn matrix_handler(data: Json<Data>) -> String {
     let semaphore = Arc::new(Semaphore::new(MAX_WORKERS));
     // println!("Received matrix: {:?}", matrix);
     //let w =thread::spawn(move || {
-    let t = handle_request(
-        data.matrix_a.clone(),
-        data.matrix_b.clone(),
+    let res = handle_request(
+        Arc::new(data.matrix_a.clone()),
+        Arc::new(data.matrix_b.clone()),
         result.clone(),
         semaphore.clone(),
     );
-    println!("res: {}", t);
+    println!("res: {}", res);
     //});
     //w.join().unwrap();
     // "OK".to_string()
-    t
+    res
 }
 
 #[launch]
@@ -61,8 +61,8 @@ fn rocket() -> _ {
 // }
 
 fn handle_request(
-    matrix_a: Matrix,
-    matrix_b: Matrix,
+    matrix_a: Arc<Matrix>,
+    matrix_b: Arc<Matrix>,
     result: Arc<Mutex<Matrix>>,
     semaphore: Arc<Semaphore>,
 ) -> String {
@@ -78,9 +78,11 @@ fn handle_request(
             println!("bef {}, {}", i, j);
             semaphore.wait();
             println!("aft {}, {}", i, j);
+
             let result = Arc::clone(&result);
-            let matrix_b = matrix_b.clone();
-            let matrix_a = matrix_a.clone();
+            let matrix_a = Arc::clone(&matrix_a);
+            let matrix_b = Arc::clone(&matrix_b);
+
             let worker = thread::spawn(move || {
                 let mut sum = 0;
                 for i in 0..matrix_b.len() {
