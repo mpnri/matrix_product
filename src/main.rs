@@ -63,22 +63,21 @@ fn rocket() -> _ {
 fn handle_request(
     matrix_a: Matrix,
     matrix_b: Matrix,
-    result: Arc<Mutex<Vec<Vec<i32>>>>,
+    result: Arc<Mutex<Matrix>>,
     semaphore: Arc<Semaphore>,
 ) -> String {
     let mut workers = Vec::new();
-    //let mut i=0;
-    //let mut j=0;
+    let mut i = 0;
+    let mut j = 0;
     for row in 0..matrix_a.len() {
-        //i+=1;
-        //j=0;
-        let matrix_b = matrix_b.clone();
+        i += 1;
+        j = 0;
         for col in 0..matrix_b[0].len() {
-            //j+=1;
+            j += 1;
             let semaphore = Arc::clone(&semaphore);
-            //println!("bef {}, {}", i,j);
+            println!("bef {}, {}", i, j);
             semaphore.wait();
-            //println!("aft {}, {}", i,j);
+            println!("aft {}, {}", i, j);
             let result = Arc::clone(&result);
             let matrix_b = matrix_b.clone();
             let matrix_a = matrix_a.clone();
@@ -89,7 +88,7 @@ fn handle_request(
                 }
                 let mut result = result.lock().unwrap();
                 result[row][col] = sum;
-                thread::sleep(Duration::from_secs(1));
+                thread::sleep(Duration::from_secs(3));
                 semaphore.signal();
             });
             workers.push(worker);
@@ -114,20 +113,20 @@ fn handle_request(
     response
 }
 
-fn parse_request(request: &str) -> (Vec<Vec<i32>>, Vec<Vec<i32>>) {
-    let lines: Vec<&str> = request.lines().collect();
-    let matrix_a: Vec<Vec<i32>> = lines[lines.len() - 2]
-        .split(",")
-        .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
-        .collect();
-    let matrix_b: Vec<Vec<i32>> = lines[lines.len() - 1]
-        .split(",")
-        .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
-        .collect();
-    (matrix_a, matrix_b)
-}
+// fn parse_request(request: &str) -> (Matrix, Matrix) {
+//     let lines: Vec<&str> = request.lines().collect();
+//     let matrix_a: Matrix = lines[lines.len() - 2]
+//         .split(",")
+//         .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
+//         .collect();
+//     let matrix_b: Matrix = lines[lines.len() - 1]
+//         .split(",")
+//         .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
+//         .collect();
+//     (matrix_a, matrix_b)
+// }
 
-fn matrix_to_string(matrix: &Vec<Vec<i32>>) -> String {
+fn matrix_to_string(matrix: &Matrix) -> String {
     let mut result = String::new();
     let mut max_val_len = 0;
     matrix.iter().for_each(|row| {
