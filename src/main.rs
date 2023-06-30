@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use rocket::serde::{json::Json, Deserialize};
 use rocket::{get, launch, post, routes};
 use std::io::{Read, Write};
@@ -5,6 +7,7 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 #[get("/")]
 fn index() -> &'static str {
@@ -64,12 +67,19 @@ fn handle_request(
     semaphore: Arc<Semaphore>,
 ) -> String {
     let mut workers = Vec::new();
+    //let mut i=0;
+    //let mut j=0;
     for row in 0..matrix_a.len() {
+        //i+=1;
+        //j=0;
         let matrix_b = matrix_b.clone();
         for col in 0..matrix_b[0].len() {
-            let semaphore = semaphore.clone();
+            //j+=1;
+            let semaphore = Arc::clone(&semaphore);
+            //println!("bef {}, {}", i,j);
             semaphore.wait();
-            let result = result.clone();
+            //println!("aft {}, {}", i,j);
+            let result = Arc::clone(&result);
             let matrix_b = matrix_b.clone();
             let matrix_a = matrix_a.clone();
             let worker = thread::spawn(move || {
@@ -79,6 +89,7 @@ fn handle_request(
                 }
                 let mut result = result.lock().unwrap();
                 result[row][col] = sum;
+                thread::sleep(Duration::from_secs(1));
                 semaphore.signal();
             });
             workers.push(worker);
@@ -164,11 +175,13 @@ impl Semaphore {
             count = self.condvar.wait(count).unwrap();
         }
         *count -= 1;
+        println!("wait {}", count);
     }
 
     pub fn signal(&self) {
         let mut count = self.count.lock().unwrap();
         *count += 1;
+        println!("signal {}", count);
         self.condvar.notify_one();
     }
 }
