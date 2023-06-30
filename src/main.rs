@@ -1,13 +1,37 @@
 #![allow(unused)]
 
+use rocket::fairing::{Fairing, Info, Kind};
+use rocket::http::Header;
 use rocket::serde::{json::Json, Deserialize};
-use rocket::{get, launch, post, routes};
+use rocket::{get, launch, options, post, routes, Request, Response};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
+
+pub struct CORS;
+
+#[rocket::async_trait]
+impl Fairing for CORS {
+    fn info(&self) -> Info {
+        Info {
+            name: "Cross-Origin-Resource-Sharing Fairing",
+            kind: Kind::Response,
+        }
+    }
+
+    async fn on_response<'r>(&self, _request: &'r Request<'_>, response: &mut Response<'r>) {
+        response.set_header(Header::new("Access-Control-Allow-Origin", "*"));
+        response.set_header(Header::new(
+            "Access-Control-Allow-Methods",
+            "POST, GET, PATCH, OPTIONS",
+        ));
+        response.set_header(Header::new("Access-Control-Allow-Headers", "*"));
+        response.set_header(Header::new("Access-Control-Allow-Credentials", "true"));
+    }
+}
 
 #[get("/")]
 fn index() -> &'static str {
@@ -51,9 +75,18 @@ fn matrix_handler(data: Json<Data>) -> String {
     res
 }
 
+#[options("/")]
+fn options() -> String {
+    // Check if the GET and POST methods are supported
+    //let allowed_methods = vec!["GET", "POST"];
+    "OK".to_string()
+}
+
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![matrix_handler])
+    rocket::build()
+        .attach(CORS)
+        .mount("/", routes![matrix_handler, options])
 }
 
 // fn main() {
@@ -90,7 +123,7 @@ fn handle_request(
                 }
                 let mut result = result.lock().unwrap();
                 result[row][col] = sum;
-                thread::sleep(Duration::from_secs(3));
+                //thread::sleep(Duration::from_secs(3));
                 semaphore.signal();
             });
             workers.push(worker);
