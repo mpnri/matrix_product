@@ -1,4 +1,4 @@
-const apiUrl = "localhost:8000/";
+const apiUrl = "http://localhost:8000/";
 
 const submit = document.getElementById("submit");
 let isLoading = false;
