@@ -3,10 +3,11 @@
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::serde::{json::Json, Deserialize};
-use rocket::{get, launch, options, post, routes, Request, Response};
+use rocket::{get, launch, options, post, routes, Request, Response, State};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -48,31 +49,69 @@ struct Data {
     matrix_b: Matrix,
 }
 
-const MAX_WORKERS: usize = 4; // maximum number of worker processes???
+const MAX_WORKERS: isize = 4; // maximum number of worker processes???
 const TASK_SIZE: usize = 2; // maximum number of rows or columns???
 
 #[post("/", format = "json", data = "<data>")]
-fn matrix_handler(data: Json<Data>) -> String {
+fn matrix_handler(
+    data: Json<Data>,
+    rx: &State<Arc<Mutex<Receiver<usize>>>>,
+    tx: &State<Arc<Mutex<Sender<usize>>>>,
+) -> String {
     println!("Received matrix: {:?}", data.matrix_a);
     println!("Received matrix: {:?}", data.matrix_b);
+
     let height = data.matrix_a.len();
     let width = data.matrix_b[0].len();
-    //let result = Arc::new(Mutex::new(vec![vec![0; TASK_SIZE]; TASK_SIZE]));
     let result = Arc::new(Mutex::new(vec![vec![0; width]; height]));
+
     let semaphore = Arc::new(Semaphore::new(MAX_WORKERS));
-    // println!("Received matrix: {:?}", matrix);
+    let mut semaphore_number = MAX_WORKERS;
+
+    let rx = Arc::clone(&rx);
+    let sm = Arc::clone(&semaphore);
+    thread::spawn(move || loop {
+        let rx = rx.lock().unwrap();
+        let cnt = rx.recv().unwrap();
+        println!("recv: {}", cnt);
+        if cnt == 0 {
+            println!("end");
+            break;
+        } else if cnt > 0 {
+            let cnt = isize::try_from(cnt).expect("err usize to isize");
+            let change = cnt - semaphore_number;
+            sm.change_count(change);
+            semaphore_number = cnt;
+        }
+    });
+
     //let w =thread::spawn(move || {
     let res = handle_request(
         Arc::new(data.matrix_a.clone()),
         Arc::new(data.matrix_b.clone()),
         result.clone(),
-        semaphore.clone(),
+        semaphore,
     );
+
+    //* End Checking for worker count */
+    let tx = tx.lock().unwrap();
+    tx.send(0).unwrap();
     println!("res: {}", res);
-    //});
-    //w.join().unwrap();
-    // "OK".to_string()
     res
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "rocket::serde")]
+struct WorkerData {
+    count: usize,
+}
+
+#[post("/workers", format = "json", data = "<data>")]
+fn workers_number_handler(data: Json<WorkerData>, tx: &State<Arc<Mutex<Sender<usize>>>>) -> String {
+    let tx = tx.lock().unwrap();
+    println!("workers_number_handler: {}", data.count);
+    tx.send(data.count);
+    "OK".to_string()
 }
 
 #[options("/")]
@@ -84,14 +123,15 @@ fn options() -> String {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build()
-        .attach(CORS)
-        .mount("/", routes![matrix_handler, options])
-}
+    let (tx, rx): (Sender<usize>, Receiver<usize>) = channel();
+    let tx = Arc::new(Mutex::new(tx));
+    let rx = Arc::new(Mutex::new(rx));
 
-// fn main() {
-//     println!("Hello, world!");
-// }
+    rocket::build().attach(CORS).manage(rx).manage(tx).mount(
+        "/",
+        routes![matrix_handler, workers_number_handler, options],
+    )
+}
 
 fn handle_request(
     matrix_a: Arc<Matrix>,
@@ -102,6 +142,7 @@ fn handle_request(
     let mut workers = Vec::new();
     let mut i = 0;
     let mut j = 0;
+    //* thread::sleep(Duration::from_secs(3));
     for row in 0..matrix_a.len() {
         i += 1;
         j = 0;
@@ -123,10 +164,11 @@ fn handle_request(
                 }
                 let mut result = result.lock().unwrap();
                 result[row][col] = sum;
-                //thread::sleep(Duration::from_secs(3));
+                //* thread::sleep(Duration::from_secs(3));
                 semaphore.signal();
             });
             workers.push(worker);
+            // workers.remove(index)
         }
     }
     println!("workers length: {}", workers.len());
@@ -147,19 +189,6 @@ fn handle_request(
     );
     response
 }
-
-// fn parse_request(request: &str) -> (Matrix, Matrix) {
-//     let lines: Vec<&str> = request.lines().collect();
-//     let matrix_a: Matrix = lines[lines.len() - 2]
-//         .split(",")
-//         .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
-//         .collect();
-//     let matrix_b: Matrix = lines[lines.len() - 1]
-//         .split(",")
-//         .map(|row| row.split(" ").map(|x| x.parse().unwrap()).collect())
-//         .collect();
-//     (matrix_a, matrix_b)
-// }
 
 fn matrix_to_string(matrix: &Matrix) -> String {
     let mut result = String::new();
@@ -191,12 +220,12 @@ fn matrix_to_string(matrix: &Matrix) -> String {
 }
 
 struct Semaphore {
-    count: Mutex<usize>,
+    count: Mutex<isize>,
     condvar: Condvar,
 }
 
 impl Semaphore {
-    pub fn new(count: usize) -> Semaphore {
+    pub fn new(count: isize) -> Semaphore {
         Semaphore {
             count: Mutex::new(count),
             condvar: Condvar::new(),
@@ -217,5 +246,10 @@ impl Semaphore {
         *count += 1;
         println!("signal {}", count);
         self.condvar.notify_one();
+    }
+
+    pub fn change_count(&self, num: isize) {
+        let mut count = self.count.lock().unwrap();
+        *count += num;
     }
 }
